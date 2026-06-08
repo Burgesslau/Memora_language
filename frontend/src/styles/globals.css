@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+
+  --shadow-soft: 0 2px 8px -1px rgba(0, 0, 0, 0.08);
+  --shadow-medium: 0 10px 20px -3px rgba(0, 0, 0, 0.12);
+  --shadow-floating: 0 20px 32px -4px rgba(0, 0, 0, 0.15);
+}
+
+:root {
+  --background: 210 20% 98%;
+  --card: 0 0% 100%;
+  --text: 222 47% 11%;
+  --muted: 215 16% 47%;
+  --border: 214 32% 91%;
+  --accent: 243 75% 59%;
+  --accent-hover: 243 75% 49%;
+  --accent-active: 243 75% 44%;
+  --graph-highlight: 3 75% 59%;
+  --success: 142 72% 45%;
+  --warning: 38 92% 50%;
+  --error: 350 84% 60%;
+}
+
+.dark {
+  --background: 220 50% 8%;
+  --card: 217 33% 17%;
+  --text: 210 20% 98%;
+  --muted: 215 20% 65%;
+  --border: 217 33% 25%;
+  --accent: 235 90% 74%;
+  --accent-hover: 235 90% 64%;
+  --accent-active: 235 90% 59%;
+  --graph-highlight: 155 90% 74%;
+  --success: 160 68% 52%;
+  --warning: 43 96% 58%;
+  --error: 350 89% 70%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--text));
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.text-display {
+  font-size: 3rem;
+  line-height: 1.2;
+}
+
+.text-hero {
+  font-size: 2rem;
+  line-height: 1.25;
+}
+
+.text-heading {
+  font-size: 1.5rem;
+  line-height: 1.35;
+}
+
+.text-subtitle {
+  font-size: 1.125rem;
+  line-height: 1.4;
+}
+
+.text-base {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.text-xs {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+
+.shadow-medium {
+  box-shadow: var(--shadow-medium);
+}
+
+.shadow-floating {
+  box-shadow: var(--shadow-floating);
+}

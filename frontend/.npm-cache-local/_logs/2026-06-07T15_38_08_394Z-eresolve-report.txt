@@ -1,0 +1,16 @@
+'Log files:
+E:\1_Code Project\3_self_project\Memora_language_2026_6_7\frontend\.npm-cache-local\_logs\2026-06-07T15_38_08_394Z-debug-0.log
+
+# npm resolution error report
+
+While resolving: smart-grammar-frontend@0.1.0
+Found: react@19.2.7
+node_modules/react
+  react@"^19.0.0" from the root project
+
+Could not resolve dependency:
+peer react@"^18.0.0" from @testing-library/react@14.3.1
+node_modules/@testing-library/react
+  dev @testing-library/react@"^14.1.2" from the root project
+
+Fix the upstream dependency conflict, or retry this command with --force or --legacy-peer-deps to accept an incorrect (and potentially broken) dependency resolution.
