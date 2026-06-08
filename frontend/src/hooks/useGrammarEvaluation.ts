@@ -24,12 +24,15 @@ export function useGrammarEvaluation() {
   });
 
   const diagnoseMutation = useMutation({
-    mutationFn: (grammarPoint: string) =>
-      diagnoseBottleneck({
+    mutationFn: (grammarPoint: string) => {
+      const currentFailures =
+        useUserStore.getState().failureCounts[grammarPoint] ?? 0;
+      return diagnoseBottleneck({
         user_id: userId,
         grammar_point: grammarPoint,
-        consecutive_failures: failureCounts[grammarPoint] ?? 0,
-      }),
+        consecutive_failures: currentFailures,
+      });
+    },
   });
 
   return { speakMutation, diagnoseMutation, failureCounts };

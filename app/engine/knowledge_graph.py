@@ -41,7 +41,7 @@ class KnowledgeGraph:
         "present_perfect_continuous": GraphNode(
             node_id="present_perfect_continuous",
             label="现在完成进行时",
-            description="have/has been + V-ing 结构",
+            description="have/has been + V-ing",
             prerequisites=["present_perfect", "present_continuous", "auxiliary_have_be"],
         ),
         "present_perfect": GraphNode(
@@ -91,6 +91,12 @@ class KnowledgeGraph:
             label="不定冠词 a/an",
             description="可数名词单数前的 a/an 选择",
             prerequisites=[],
+        ),
+        "passive_voice": GraphNode(
+            node_id="passive_voice",
+            label="被动语态",
+            description="be + 过去分词",
+            prerequisites=["auxiliary_have_be", "past_participle"],
         ),
     }
 

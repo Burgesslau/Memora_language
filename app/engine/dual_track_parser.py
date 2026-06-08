@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from app.engine.lexicon import LexiconEngine, get_lexicon_engine
+from app.engine.lexicon import ChinglishMatch, LexiconEngine, get_lexicon_engine
 from app.models.schemas import (
     CoreStructureResult,
     ErrorSeverity,
@@ -94,8 +94,9 @@ class DualTrackParser:
             return self._parse_free_mode(
                 cleaned_text, core_result, issues, lexical_info
             )
+        chinglish_matches = self.lexicon.detect_chinglish(cleaned_text)
         return self._parse_strict_mode(
-            cleaned_text, core_result, issues, lexical_info
+            cleaned_text, core_result, issues, lexical_info, chinglish_matches
         )
 
     def _parse_free_mode(
@@ -164,6 +165,7 @@ class DualTrackParser:
         core_result: CoreStructureResult,
         issues: list[GrammarIssue],
         lexical_info: list[dict] | None = None,
+        chinglish_matches: list[ChinglishMatch] | None = None,
     ) -> ParseOutputResponse:
         """
         严谨应试模式解析。
@@ -178,6 +180,11 @@ class DualTrackParser:
             lexical_info: 词典信息列表（可选），用于增强错误检测
         """
         error_tags = [self._issue_to_error_tag(issue) for issue in issues]
+
+        # 双语词典：中式英语直译阻断（Strict Mode）
+        for match in chinglish_matches or []:
+            error_tags.append(self._chinglish_to_error_tag(match))
+
         micro_drills = []
 
         # 核心结构缺失也作为错误标签
@@ -345,6 +352,26 @@ class DualTrackParser:
         return base_feedback + enhancement if enhancement else base_feedback
 
     @staticmethod
+    def _chinglish_to_error_tag(match: ChinglishMatch) -> ErrorTag:
+        """将 ChinglishMatch 转为 ErrorTag（含 span 字段）。"""
+        from app.models.schemas import TokenSpan
+
+        return ErrorTag(
+            grammar_point=f"chinglish_{match.lemma}",
+            message=match.message,
+            severity=ErrorSeverity.HIGH,
+            star_level=3,
+            error_type="chinglish",
+            span=TokenSpan(
+                start_char=match.char_span[0],
+                end_char=match.char_span[1],
+                text=match.matched_text,
+                token_index=None,
+            ),
+            suggestion=match.suggestion or None,
+        )
+
+    @staticmethod
     def _issue_to_error_tag(issue: GrammarIssue) -> ErrorTag:
         """将内部 GrammarIssue 转为 ErrorTag 响应模型。"""
         from app.models.schemas import TokenSpan
@@ -384,4 +411,5 @@ class DualTrackParser:
 # [x] Free Mode: 核心结构正确 -> passed=True, silent_errors 记录细节
 # [x] Strict Mode: 全语法检查 -> error_tags 含 grammar_point, severity, star_level
 # [x] 返回格式统一使用 ParseOutputResponse Pydantic 模型
+# [x] Strict Mode: 双语词典中式英语阻断（chinglish error_tags + span）
 # [x] 完整类型提示、中文注释与 Google-style docstring

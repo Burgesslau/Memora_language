@@ -66,8 +66,14 @@ export const useUserStore = create<UserState>()(
 
         if (!result.passed && errors.length > 0) {
           get().incrementFailure(errors[0].grammar_point);
-        } else if (result.passed && errors.length === 0) {
-          errors.forEach(() => {});
+        } else if (result.passed) {
+          const pointsToReset = new Set(errors.map((err) => err.grammar_point));
+          if (pointsToReset.size === 0) {
+            Object.keys(get().failureCounts).forEach((gp) =>
+              pointsToReset.add(gp),
+            );
+          }
+          pointsToReset.forEach((gp) => get().resetFailure(gp));
         }
       },
       incrementFailure: (grammarPoint) => {

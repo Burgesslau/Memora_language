@@ -11,5 +11,8 @@ asyncpg>=0.29.0
 loguru>=0.7.0
 rich>=13.0.0
 
+# 测试
+pytest>=8.0.0
+
 # 安装 spaCy 英文模型（部署时执行）:
 # python -m spacy download en_core_web_sm

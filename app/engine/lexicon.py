@@ -1,77 +1,80 @@
 """
-词典与形态学引擎（Lexicon & Morphology Engine）。
+双语词典与形态学引擎（Bilingual Lexicon & Morphology Engine）。
 
-为语法解析提供词形变化、词根词缀、不规则形式、常见搭配等确定性支持，
-提升双轨解析器的精度。
-
-核心功能：
-- 词形还原与形态分析（Lemmatization & Inflection）
-- 词性与语法属性标注（POS + Grammatical Features）
-- 常见搭配与用法库（Collocations）
-- 词根词缀家族（Word Family）
-- 与知识图谱联动
+为语法解析提供词形变化、双语多义项、中英搭配映射与中式英语直译阻断，
+提升 Strict Mode 的确定性检测精度。禁止 LLM 判定。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
 
-class LexicalEntry(BaseModel):
-    """
-    词典条目数据模型。
+class BilingualSense(BaseModel):
+    """双语词条义项模型。"""
 
-    Attributes:
-        lemma: 词根（标准形式）
-        pos: 词性 (VERB, NOUN, ADJ, ADV, etc.)
-        inflections: 形态变化 {"past": "went", "past_participle": "gone", ...}
-        irregular: 是否不规则变化
-        grammatical_features: 语法属性 {"countable": True, "requires_article": True, ...}
-        common_collocations: 常见搭配列表
-        word_family: 派生词列表 (e.g., ["decide", "decision", "indecisive"])
-        grammar_point_ids: 关联的语法点 ID (e.g., ["present_perfect", "past_simple"])
-    """
+    model_config = ConfigDict(from_attributes=True)
+
+    sense_id: str
+    chinese_definition: str
+    english_definition: str
+    valid_structures: List[str] = Field(default_factory=list)
+    forbidden_translations: Dict[str, str] = Field(default_factory=dict)
+    example_pair: Dict[str, str] = Field(default_factory=dict)
+
+
+class LexicalEntry(BaseModel):
+    """完整的双语形态学词条。"""
+
+    model_config = ConfigDict(from_attributes=True)
 
     lemma: str
     pos: str
-    inflections: Dict[str, str] = {}
+    inflections: Dict[str, str] = Field(default_factory=dict)
     irregular: bool = False
-    grammatical_features: Dict[str, bool] = {}
-    common_collocations: List[str] = []
-    word_family: List[str] = []
-    grammar_point_ids: List[str] = []
+    grammatical_features: Dict[str, bool] = Field(default_factory=dict)
+    common_collocations: List[str] = Field(default_factory=list)
+    word_family: List[str] = Field(default_factory=list)
+    grammar_point_ids: List[str] = Field(default_factory=list)
+    senses: List[BilingualSense] = Field(default_factory=list)
 
-    class Config:
-        """Pydantic 配置。"""
-        frozen = False
+
+@dataclass
+class ChinglishMatch:
+    """中式英语阻断匹配结果（内部数据结构）。"""
+
+    lemma: str
+    sense_id: str
+    matched_text: str
+    char_span: tuple[int, int]
+    message: str
+    chinese_definition: str
+    suggestion: str
+    forbidden_pattern: str
 
 
 class LexiconEngine:
     """
-    词典与形态学引擎。
+    双语词典与形态学引擎。
 
-    管理词条库、提供词形查询、搭配检索、词族扩展等功能。
-    初始版本采用内置 JSON 词典，后期可扩展为数据库。
-
-    Attributes:
-        dictionary: 词条库 {lemma: LexicalEntry}
-        collocations_index: 搭配索引 {collocation: [grammar_points]}
+    管理词条库、词形反查、搭配检索与中式英语阻断。
+    现阶段内存预埋高频易错词，Phase 2 可持久化至 PostgreSQL。
     """
 
-    def __init__(self, dictionary_path: Optional[str] = None):
+    def __init__(self, dictionary_path: Optional[str] = None) -> None:
         """
         初始化词典引擎。
 
         Args:
-            dictionary_path: 可选的外部字典文件路径（JSON 格式）。
-                            如果不指定，使用内置默认字典。
+            dictionary_path: 可选外部 JSON 词典路径。
         """
         self.dictionary: Dict[str, LexicalEntry] = {}
         self.collocations_index: Dict[str, List[str]] = {}
@@ -79,57 +82,124 @@ class LexiconEngine:
         if dictionary_path and Path(dictionary_path).exists():
             self.load_from_file(dictionary_path)
         else:
-            self.load_default_dictionary()
+            self.dictionary = self._load_bilingual_data()
 
-        logger.info(
-            "词典引擎初始化完成，已加载 %d 个词条", len(self.dictionary)
+        logger.info("词典引擎初始化完成，已加载 %d 个词条", len(self.dictionary))
+
+    def _load_bilingual_data(self) -> Dict[str, LexicalEntry]:
+        """加载内置双语词典（含形态学与中英阻断规则）。"""
+        entries: Dict[str, LexicalEntry] = {}
+
+        entries["marry"] = LexicalEntry(
+            lemma="marry",
+            pos="VERB",
+            irregular=False,
+            inflections={
+                "past": "married",
+                "past_participle": "married",
+                "gerund": "marrying",
+                "third_person_singular": "marries",
+            },
+            grammatical_features={"transitive": True},
+            common_collocations=["marry sb", "get married to sb"],
+            word_family=["marry", "marriage", "married", "marries"],
+            grammar_point_ids=["verb_collocation", "transitive_verb"],
+            senses=[
+                BilingualSense(
+                    sense_id="marry_v_1",
+                    chinese_definition="和…结婚",
+                    english_definition=(
+                        "To become the legally accepted partner of someone."
+                    ),
+                    valid_structures=["marry sb", "get married to sb"],
+                    forbidden_translations={
+                        "marry with": (
+                            "marry 是及物动词，后面直接加人，不能加 with"
+                        ),
+                    },
+                    example_pair={
+                        "en": "He married her.",
+                        "zh": "他娶了她。",
+                    },
+                ),
+            ],
         )
 
-    def load_default_dictionary(self) -> None:
-        """加载内置高频英语词典（包含不规则动词与常见搭配）。"""
-        # 不规则动词
-        self.dictionary["go"] = LexicalEntry(
+        entries["decide"] = LexicalEntry(
+            lemma="decide",
+            pos="VERB",
+            irregular=False,
+            inflections={
+                "past": "decided",
+                "past_participle": "decided",
+                "gerund": "deciding",
+                "third_person_singular": "decides",
+            },
+            grammatical_features={"transitive": True},
+            common_collocations=["decide on", "decide to", "decide against"],
+            word_family=["decides", "deciding", "decided", "decision", "indecisive"],
+            grammar_point_ids=["verb_collocation", "present_simple", "past_simple"],
+            senses=[
+                BilingualSense(
+                    sense_id="decide_v_1",
+                    chinese_definition="决定",
+                    english_definition="To make a choice about something.",
+                    valid_structures=["decide on sth", "decide to do sth"],
+                    forbidden_translations={
+                        "decide sth without on": (
+                            "decide 后接 on/upon/to，不能直接接宾语"
+                        ),
+                    },
+                    example_pair={
+                        "en": "We decided on the date.",
+                        "zh": "我们决定了日期。",
+                    },
+                ),
+            ],
+        )
+
+        entries["go"] = LexicalEntry(
             lemma="go",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "went",
                 "past_participle": "gone",
                 "gerund": "going",
                 "third_person_singular": "goes",
             },
-            irregular=True,
             grammatical_features={"transitive": False},
             common_collocations=["go to", "go with", "go on", "go back"],
             word_family=["goes", "going", "gone", "went"],
             grammar_point_ids=["present_simple", "past_simple", "present_perfect"],
         )
 
-        self.dictionary["come"] = LexicalEntry(
+        entries["come"] = LexicalEntry(
             lemma="come",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "came",
                 "past_participle": "come",
                 "gerund": "coming",
                 "third_person_singular": "comes",
             },
-            irregular=True,
             grammatical_features={"transitive": False},
             common_collocations=["come back", "come across", "come up"],
             word_family=["comes", "coming", "came"],
             grammar_point_ids=["present_simple", "past_simple"],
         )
 
-        self.dictionary["have"] = LexicalEntry(
+        entries["have"] = LexicalEntry(
             lemma="have",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "had",
                 "past_participle": "had",
                 "gerund": "having",
                 "third_person_singular": "has",
             },
-            irregular=True,
             grammatical_features={"transitive": True},
             common_collocations=["have to", "have got", "have breakfast"],
             word_family=["has", "having", "had"],
@@ -138,27 +208,44 @@ class LexiconEngine:
                 "past_perfect",
                 "present_continuous",
             ],
+            senses=[
+                BilingualSense(
+                    sense_id="have_v_perfect",
+                    chinese_definition="有；完成体助动词",
+                    english_definition="Auxiliary for perfect tenses.",
+                    valid_structures=["have + past participle"],
+                    forbidden_translations={
+                        "have went": "完成时用 have + 过去分词，不能用 went",
+                        "have went to": "完成时用 have gone，不能用 went",
+                    },
+                    example_pair={
+                        "en": "I have gone to school.",
+                        "zh": "我已经去学校了。",
+                    },
+                ),
+            ],
         )
 
-        self.dictionary["do"] = LexicalEntry(
+        entries["do"] = LexicalEntry(
             lemma="do",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "did",
                 "past_participle": "done",
                 "gerund": "doing",
                 "third_person_singular": "does",
             },
-            irregular=True,
             grammatical_features={"transitive": True},
             common_collocations=["do homework", "do work", "do business"],
             word_family=["does", "doing", "done", "did"],
             grammar_point_ids=["present_simple", "past_simple", "question_formation"],
         )
 
-        self.dictionary["be"] = LexicalEntry(
+        entries["be"] = LexicalEntry(
             lemma="be",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "was/were",
                 "past_participle": "been",
@@ -167,7 +254,6 @@ class LexiconEngine:
                 "present_second_person": "are",
                 "present_third_person": "is",
             },
-            irregular=True,
             grammatical_features={"transitive": False},
             common_collocations=["be happy", "be at", "be about"],
             word_family=["am", "is", "are", "was", "were", "being", "been"],
@@ -179,16 +265,16 @@ class LexiconEngine:
             ],
         )
 
-        self.dictionary["make"] = LexicalEntry(
+        entries["make"] = LexicalEntry(
             lemma="make",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "made",
                 "past_participle": "made",
                 "gerund": "making",
                 "third_person_singular": "makes",
             },
-            irregular=True,
             grammatical_features={"transitive": True},
             common_collocations=[
                 "make a decision",
@@ -197,256 +283,265 @@ class LexiconEngine:
             ],
             word_family=["makes", "making", "made"],
             grammar_point_ids=["present_simple", "past_simple"],
+            senses=[
+                BilingualSense(
+                    sense_id="make_v_collocation",
+                    chinese_definition="做；使",
+                    english_definition="To create or cause.",
+                    valid_structures=["make a decision", "make progress"],
+                    forbidden_translations={
+                        "do a decision": "decision 与 make 搭配，不能说 do a decision",
+                        "do decision": "decision 与 make 搭配，不能说 do decision",
+                    },
+                    example_pair={
+                        "en": "make a decision",
+                        "zh": "做决定",
+                    },
+                ),
+            ],
         )
 
-        self.dictionary["decide"] = LexicalEntry(
-            lemma="decide",
-            pos="VERB",
-            inflections={
-                "past": "decided",
-                "past_participle": "decided",
-                "gerund": "deciding",
-                "third_person_singular": "decides",
-            },
-            irregular=False,
-            grammatical_features={"transitive": True},
-            common_collocations=["decide on", "decide to", "decide against"],
-            word_family=["decides", "deciding", "decided", "decision", "indecisive"],
-            grammar_point_ids=["present_simple", "past_simple", "present_perfect"],
-        )
-
-        self.dictionary["run"] = LexicalEntry(
+        entries["run"] = LexicalEntry(
             lemma="run",
             pos="VERB",
+            irregular=True,
             inflections={
                 "past": "ran",
                 "past_participle": "run",
                 "gerund": "running",
                 "third_person_singular": "runs",
             },
-            irregular=True,
             grammatical_features={"transitive": False},
             common_collocations=["run away", "run into", "run out"],
             word_family=["runs", "running", "ran"],
             grammar_point_ids=["present_simple", "past_simple"],
         )
 
-        self.dictionary["child"] = LexicalEntry(
+        entries["child"] = LexicalEntry(
             lemma="child",
             pos="NOUN",
-            inflections={"plural": "children"},
             irregular=True,
+            inflections={"plural": "children"},
             grammatical_features={"countable": True, "requires_article": True},
             common_collocations=["child development", "child care"],
             word_family=["children", "childhood", "childish"],
             grammar_point_ids=["noun_plural"],
         )
 
-        self.dictionary["person"] = LexicalEntry(
+        entries["person"] = LexicalEntry(
             lemma="person",
             pos="NOUN",
-            inflections={"plural": "people"},
             irregular=True,
+            inflections={"plural": "people"},
             grammatical_features={"countable": True, "requires_article": True},
             common_collocations=["person in charge", "elderly person"],
             word_family=["people", "person", "personal", "personality"],
             grammar_point_ids=["noun_plural"],
         )
 
-        # 规则名词示例
-        self.dictionary["book"] = LexicalEntry(
+        entries["book"] = LexicalEntry(
             lemma="book",
             pos="NOUN",
-            inflections={"plural": "books"},
             irregular=False,
+            inflections={"plural": "books"},
             grammatical_features={"countable": True, "requires_article": True},
             common_collocations=["read a book", "write a book"],
             word_family=["books", "bookshelf", "bookworm"],
             grammar_point_ids=["noun_plural"],
         )
 
-        self.dictionary["school"] = LexicalEntry(
+        entries["school"] = LexicalEntry(
             lemma="school",
             pos="NOUN",
-            inflections={"plural": "schools"},
             irregular=False,
+            inflections={"plural": "schools"},
             grammatical_features={"countable": True, "requires_article": True},
             common_collocations=["go to school", "at school"],
             word_family=["schools", "schooling", "scholar"],
             grammar_point_ids=["noun_plural"],
         )
 
-        # 形容词示例
-        self.dictionary["happy"] = LexicalEntry(
+        entries["happy"] = LexicalEntry(
             lemma="happy",
             pos="ADJ",
-            inflections={"comparative": "happier", "superlative": "happiest"},
             irregular=False,
-            grammatical_features={},
+            inflections={"comparative": "happier", "superlative": "happiest"},
             common_collocations=["be happy", "happy ending"],
             word_family=["happier", "happiest", "happiness", "happily"],
             grammar_point_ids=["adjective_comparative"],
         )
 
-        logger.debug("内置词典加载完成，共 %d 个词条", len(self.dictionary))
+        return entries
 
     def load_from_file(self, file_path: str) -> None:
-        """
-        从 JSON 文件加载词典（格式与 load_default_dictionary 一致）。
-
-        Args:
-            file_path: 词典文件路径
-        """
+        """从 JSON 文件加载词典。"""
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for lemma, entry_data in data.items():
                     self.dictionary[lemma] = LexicalEntry(**entry_data)
             logger.info("从文件加载词典成功：%s", file_path)
-        except Exception as e:
-            logger.error("加载词典文件失败：%s，使用默认词典", e)
+        except Exception as exc:
+            logger.error("加载词典文件失败：%s，使用内置词典", exc)
+            self.dictionary = self._load_bilingual_data()
 
     def lookup(self, word: str) -> Optional[LexicalEntry]:
-        """
-        查找词条（支持大小写不敏感）。
-
-        Args:
-            word: 查询词
-
-        Returns:
-            LexicalEntry 或 None
-        """
+        """按词根查找词条（大小写不敏感）。"""
         return self.dictionary.get(word.lower())
 
-    def lookup_tokens(self, tokens: List[str]) -> List[Dict]:
+    def lookup_token_form(self, text: str) -> Optional[LexicalEntry]:
         """
-        批量查找词条。
+        逆向词形反查词条（如 ``married`` → ``marry``）。
 
         Args:
-            tokens: 词列表
+            text: 词形或词根。
 
         Returns:
-            [{"token": str, "entry": Optional[LexicalEntry]}]
+            LexicalEntry 或 ``None``。
         """
+        text_lower = text.lower()
+        direct = self.lookup(text_lower)
+        if direct is not None:
+            return direct
+
+        for entry in self.dictionary.values():
+            if text_lower in {v.lower() for v in entry.inflections.values()}:
+                return entry
+            if text_lower in {w.lower() for w in entry.word_family}:
+                return entry
+        return None
+
+    def lookup_tokens(self, tokens: List[str]) -> List[Dict]:
+        """批量查找词条。"""
         return [
-            {
-                "token": token,
-                "entry": self.lookup(token),
-            }
+            {"token": token, "entry": self.lookup_token_form(token)}
             for token in tokens
         ]
 
-    def get_word_family(self, lemma: str) -> List[str]:
+    def detect_chinglish(self, text: str) -> List[ChinglishMatch]:
         """
-        获取词族（派生词）。
+        扫描文本中的中式英语直译模式（确定性子串匹配）。
 
         Args:
-            lemma: 词根
+            text: 用户输入句子。
 
         Returns:
-            派生词列表
+            匹配到的 ChinglishMatch 列表（去重）。
         """
+        lowered = text.lower()
+        matches: List[ChinglishMatch] = []
+        seen_spans: set[tuple[int, int]] = set()
+
+        for entry in self.dictionary.values():
+            for sense in entry.senses:
+                for pattern, tip in sense.forbidden_translations.items():
+                    for variant in self._expand_forbidden_pattern(entry, pattern):
+                        idx = lowered.find(variant)
+                        if idx == -1:
+                            continue
+                        span = (idx, idx + len(variant))
+                        if span in seen_spans:
+                            continue
+                        seen_spans.add(span)
+                        matched_text = text[idx : idx + len(variant)]
+                        valid_hint = (
+                            sense.valid_structures[0]
+                            if sense.valid_structures
+                            else ""
+                        )
+                        message = (
+                            f"中式英语搭配错误：{tip}。"
+                            f"【{sense.chinese_definition}】"
+                            f"正确用法：{valid_hint or '请参考标准结构'}"
+                        )
+                        matches.append(
+                            ChinglishMatch(
+                                lemma=entry.lemma,
+                                sense_id=sense.sense_id,
+                                matched_text=matched_text,
+                                char_span=span,
+                                message=message,
+                                chinese_definition=sense.chinese_definition,
+                                suggestion=valid_hint,
+                                forbidden_pattern=pattern,
+                            )
+                        )
+
+        matches.sort(key=lambda m: m.char_span[0])
+        return matches
+
+    @staticmethod
+    def _expand_forbidden_pattern(
+        entry: LexicalEntry, pattern: str
+    ) -> List[str]:
+        """将禁止模式扩展为含词形变体的匹配串列表。"""
+        pattern_lower = pattern.lower()
+        variants = {pattern_lower}
+        lemma = entry.lemma.lower()
+
+        inflected_forms = {lemma}
+        for form in entry.inflections.values():
+            for part in form.lower().split("/"):
+                inflected_forms.add(part.strip())
+
+        for form in inflected_forms:
+            if lemma in pattern_lower:
+                variants.add(pattern_lower.replace(lemma, form))
+            first_word = pattern_lower.split()[0] if pattern_lower.split() else ""
+            if first_word and first_word == lemma:
+                rest = pattern_lower[len(first_word) :]
+                variants.add(form + rest)
+
+        return sorted(variants, key=len, reverse=True)
+
+    def get_word_family(self, lemma: str) -> List[str]:
+        """获取词族。"""
         entry = self.lookup(lemma)
         return entry.word_family if entry else []
 
     def get_inflection(self, lemma: str, form: str) -> Optional[str]:
-        """
-        获取特定形式的变化。
-
-        Args:
-            lemma: 词根
-            form: 形式标签 (e.g., "past", "plural", "comparative")
-
-        Returns:
-            变化后的形式或 None
-        """
+        """获取特定形态变化。"""
         entry = self.lookup(lemma)
         if entry:
             return entry.inflections.get(form)
         return None
 
     def is_irregular(self, lemma: str) -> bool:
-        """
-        判断词是否为不规则变化。
-
-        Args:
-            lemma: 词根
-
-        Returns:
-            bool
-        """
+        """判断是否不规则变化。"""
         entry = self.lookup(lemma)
         return entry.irregular if entry else False
 
     def get_grammatical_features(self, word: str) -> Dict[str, bool]:
-        """
-        获取词的语法属性。
-
-        Args:
-            word: 词
-
-        Returns:
-            语法属性字典
-        """
-        entry = self.lookup(word)
+        """获取语法属性。"""
+        entry = self.lookup_token_form(word)
         return entry.grammatical_features if entry else {}
 
     def get_common_collocations(self, word: str) -> List[str]:
-        """
-        获取常见搭配。
-
-        Args:
-            word: 词
-
-        Returns:
-            搭配列表
-        """
-        entry = self.lookup(word)
+        """获取常见搭配。"""
+        entry = self.lookup_token_form(word)
         return entry.common_collocations if entry else []
 
     def get_grammar_point_ids(self, word: str) -> List[str]:
-        """
-        获取与词关联的语法点 ID。
-
-        Args:
-            word: 词
-
-        Returns:
-            语法点 ID 列表
-        """
-        entry = self.lookup(word)
+        """获取关联语法点 ID。"""
+        entry = self.lookup_token_form(word)
         return entry.grammar_point_ids if entry else []
 
     def check_collocation(self, verb: str, preposition: str) -> bool:
-        """
-        检查搭配是否常见（例如 decide on vs. decide to）。
-
-        Args:
-            verb: 动词
-            preposition: 介词/虚词
-
-        Returns:
-            是否为常见搭配
-        """
-        entry = self.lookup(verb)
+        """检查动词+介词是否为常见搭配。"""
+        entry = self.lookup_token_form(verb)
         if not entry:
-            return True  # 词不在字典中，不进行检查
+            return True
 
-        collocation = f"{verb} {preposition}"
+        collocation = f"{entry.lemma} {preposition}"
         return any(
             collocation in col or preposition in col
             for col in entry.common_collocations
         )
 
     def export_to_json(self, output_path: str) -> None:
-        """
-        将词典导出为 JSON 文件。
-
-        Args:
-            output_path: 输出路径
-        """
+        """将词典导出为 JSON 文件。"""
         output_data = {
-            lemma: entry.dict()
+            lemma: entry.model_dump()
             for lemma, entry in self.dictionary.items()
         }
         with open(output_path, "w", encoding="utf-8") as f:
@@ -454,45 +549,45 @@ class LexiconEngine:
         logger.info("词典已导出到 %s", output_path)
 
     def get_stats(self) -> Dict:
-        """
-        获取词典统计信息。
-
-        Returns:
-            统计信息字典
-        """
+        """获取词典统计信息。"""
         return {
             "total_entries": len(self.dictionary),
             "irregular_count": sum(
                 1 for entry in self.dictionary.values() if entry.irregular
+            ),
+            "bilingual_senses": sum(
+                len(entry.senses) for entry in self.dictionary.values()
             ),
             "pos_distribution": self._count_pos(),
         }
 
     def _count_pos(self) -> Dict[str, int]:
         """统计词性分布。"""
-        pos_count = {}
+        pos_count: Dict[str, int] = {}
         for entry in self.dictionary.values():
             pos_count[entry.pos] = pos_count.get(entry.pos, 0) + 1
         return pos_count
 
 
-# 全局单例实例
 _lexicon_engine: Optional[LexiconEngine] = None
 
 
 def get_lexicon_engine(
     dictionary_path: Optional[str] = None,
 ) -> LexiconEngine:
-    """
-    获取全局词典引擎单例。
-
-    Args:
-        dictionary_path: 可选的外部字典文件路径
-
-    Returns:
-        LexiconEngine 实例
-    """
+    """获取全局词典引擎单例。"""
     global _lexicon_engine
     if _lexicon_engine is None:
         _lexicon_engine = LexiconEngine(dictionary_path)
     return _lexicon_engine
+
+
+# ---------------------------------------------------------------------------
+# 代码检查清单
+# ---------------------------------------------------------------------------
+# [x] BilingualSense / LexicalEntry Pydantic v2 模型
+# [x] 双语多义项与中英搭配映射
+# [x] 中式英语 forbidden_translations 阻断（detect_chinglish）
+# [x] lookup_token_form 词形反查
+# [x] model_dump 替代 dict()，消除 Pydantic v1 弃用警告
+# [x] 禁止 LLM 判定

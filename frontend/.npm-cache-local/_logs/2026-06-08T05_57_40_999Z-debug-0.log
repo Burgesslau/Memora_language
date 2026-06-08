@@ -1,0 +1,19 @@
+0 verbose cli D:\软件\node.js\node.exe D:\软件\node.js\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.12.1
+2 info using node@v24.15.0
+3 silly config load:file:D:\软件\node.js\node_modules\npm\npmrc
+4 silly config load:file:E:\1_Code Project\3_self_project\Memora_language\frontend\.npmrc
+5 silly config load:file:C:\Users\SS\.npmrc
+6 silly config load:file:D:\软件\node.js\node_golobal\etc\npmrc
+7 verbose title npm run test --run
+8 verbose argv "run" "test" "--" "--run"
+9 verbose logfile logs-max:10 dir:E:\1_Code Project\3_self_project\Memora_language\frontend\.npm-cache-local\_logs\2026-06-08T05_57_40_999Z-
+10 verbose logfile E:\1_Code Project\3_self_project\Memora_language\frontend\.npm-cache-local\_logs\2026-06-08T05_57_40_999Z-debug-0.log
+11 silly logfile start cleaning logs, removing 1 files
+12 silly logfile done cleaning log files
+13 verbose cwd E:\1_Code Project\3_self_project\Memora_language\frontend
+14 verbose os Windows_NT 10.0.26200
+15 verbose node v24.15.0
+16 verbose npm  v11.12.1
+17 verbose exit 0
+18 info ok
